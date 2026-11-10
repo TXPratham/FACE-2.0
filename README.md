@@ -1,11 +1,37 @@
-# Remote Face Recognition 2.0 (Client–Server)
+# Remote Face Recognition 2.0 (Mobile Web & Client–Server)
 
-A real-time, client–server face recognition system built for **Google Antigravity's Spec-Driven Development workflow**. A smartphone functions as a wireless remote camera sensor exposing an MJPEG stream over HTTP, while a laptop runs all deep learning inference locally.
+A real-time, cross-platform face recognition and enrollment system built for **Google Antigravity's Spec-Driven Development workflow**.
+
+Transform any smartphone into an instant biometric recognition terminal with **Zero App Installation**:
+- Simply run `python run_web.py` (or `python main.py --web`), scan the terminal QR code with your phone camera, and open the mobile web dashboard in Chrome or Safari!
+- Live in-browser camera streaming over WebSockets, real-time bounding boxes and identity badges, phone shutter/gallery enrollment, and member directory management.
+- Also supports the classic desktop OpenCV HUD against phone MJPEG streams or local webcams (`python main.py`).
 
 ---
 
 ## Architecture Topology
 
+### 1. Mobile Web Mode (`run_web.py` / `main.py --web`)
+```
+┌──────────────────────────────────────────────┐                 WebSockets & REST (HTTPS)            ┌───────────────────────────────────────────────┐
+│        Smartphone (Chrome / Safari)          │ ───────────────────────────────────────────────────▶ │         Laptop (Uvicorn / FastAPI Backend)    │
+│  - No App Required! HTML5 Single-Page App    │                 https://<lan-ip>:8000                │                                               │
+│  - Camera: navigator.mediaDevices.getUserMedia│                                                      │  1. run_web.py (LAN IP & Auto-SSL & QR Code)  │
+│  - Real-time Canvas HUD Bounding Boxes       │ ◀─────────────────────────────────────────────────── │  2. web/server.py (WebSocket /ws/recognize)   │
+│  - Shutter Burst & Gallery Upload Enrollment │                  JSON Bboxes & Metadata              │  3. detector.FaceDetector (InsightFace)       │
+└──────────────────────────────────────────────┘                                                      │  4. recognizer.ArcFaceRecognizer (512-D Arc)  │
+                                                                                                      │  5. matcher.CosineMatcher (Matrix Dot-Product)│
+                                                                                                      └──────────────────────┬────────────────────────┘
+                                                                                                                             │
+                                                                                                      ┌──────────────────────▼────────────────────────┐
+                                                                                                      │      Local SQLite Database (users.db)         │
+                                                                                                      │   - 512-D float32 embedding BLOBs             │
+                                                                                                      │   - Multi-photo Centroid Master Templates     │
+                                                                                                      │   - Metadata & Role Attributes                │
+                                                                                                      └───────────────────────────────────────────────┘
+```
+
+### 2. Desktop MJPEG / Local Webcam Mode (`main.py` / `live_server.py`)
 ```
 ┌─────────────────────────────────┐                 MJPEG over HTTP                 ┌───────────────────────────────────────────────┐
 │     Smartphone (Remote Sensor)  │ ──────────────────────────────────────────────▶ │        Laptop (Python ML Inference Server)    │
@@ -24,6 +50,73 @@ A real-time, client–server face recognition system built for **Google Antigrav
                                                                                     │   - Metadata & Role Attributes                │
                                                                                     └───────────────────────────────────────────────┘
 ```
+
+---
+
+## Quickstart: One-Command Mobile Launch (Recommended)
+
+### 1. Launch Mobile Web Server
+```bash
+python run_web.py
+```
+*(or simply run `python main.py --web`)*
+
+When launched, `run_web.py` automatically:
+1. Detects your laptop's local LAN Wi-Fi IP address (e.g., `192.168.1.42` or `10.x.x.x`).
+2. Auto-generates self-signed SSL certificates (`certs/cert.pem` and `certs/key.pem`) with Subject Alternative Names (SAN) so mobile browsers permit camera hardware access.
+3. Renders a scannable ASCII QR code in the terminal pointing directly to `https://<laptop-ip>:8000`.
+4. Starts the high-speed Uvicorn ASGI server.
+
+```text
+========================================================================
+           FACE 2.0 - MOBILE RECOGNITION & ENROLLMENT SERVER        
+========================================================================
+  * Protocol:       HTTPS (SSL Enabled)
+  * Host Binding:   0.0.0.0:8000
+  * Database:       users.db
+  * Match Threshold:0.55 (ArcFace Cosine Similarity)
+------------------------------------------------------------------------
+  [>] Local URL:     https://localhost:8000
+  [>] Mobile LAN URL:https://192.168.1.42:8000
+------------------------------------------------------------------------
+  SCAN WITH SMARTPHONE CAMERA TO LAUNCH INSTANTLY:
+
+    █████████████████████████████
+    ██  ███████  ███  ███████  ██
+    ██  █     █  ███  █     █  ██
+    ... (ASCII QR Code) ...
+    █████████████████████████████
+
+------------------------------------------------------------------------
+  MOBILE USAGE TIPS:
+  1. Ensure phone & laptop are connected to the SAME Wi-Fi network.
+  2. Scan the QR code with phone camera or open: https://<laptop-ip>:8000
+  3. First-time SSL warning (normal for self-signed certificates):
+     - iOS Safari:   Tap 'Show Details' -> 'visit this website'.
+     - Android Chrome: Tap 'Advanced' -> 'Proceed to site (unsafe)'.
+  4. Tap 'Allow' when the browser asks for Camera access.
+========================================================================
+```
+
+### 2. Mobile Launcher CLI Options
+| Flag | Description | Default |
+| :--- | :--- | :--- |
+| `--host` | Network interface to bind | `0.0.0.0` |
+| `--port` | Port to bind | `8000` |
+| `--threshold` | ArcFace cosine similarity recognition threshold | `0.55` |
+| `--db` | SQLite database path | `users.db` |
+| `--ctx-id` | Inference context (`-1` for CPU, `0` for GPU) | `-1` |
+| `--http` | Run plain HTTP without SSL (camera access blocked on mobile) | `False` |
+| `--reload` | Enable Uvicorn auto-reload for development | `False` |
+
+---
+
+## Universal `main.py` Launcher
+
+`main.py` acts as a smart launcher:
+- **`python main.py --web`**: Launches the Mobile Web Server with QR code.
+- **`python main.py`**: Tries local webcam `0`; if no webcam is available, auto-falls back to launching the Mobile Web Server!
+- **`python main.py --stream-url http://<phone-ip>:8080/video`**: Runs desktop OpenCV HUD against an MJPEG video stream.
 
 ---
 
@@ -168,10 +261,20 @@ python -m pytest -v
 
 ```
 FACE 2.0/
-├── .agents/
-│   ├── rules/project.md          # Always-active architectural rules
-│   ├── skills/insightface/       # InsightFace / ArcFace skill reference
-│   └── workflows/                # Workflows for enroll & run-live
+├── certs/                        # Auto-generated self-signed SSL certificates (ignored in git)
+│   ├── cert.pem                  # X.509 certificate with IP & localhost SAN
+│   └── key.pem                   # RSA 2048 private key
+├── web/                          # Mobile Web Application & API
+│   ├── __init__.py               # Web package initialization
+│   ├── server.py                 # FastAPI backend, WebSocket /ws/recognize, REST endpoints
+│   ├── static/                   # Mobile client assets
+│   │   ├── app.js                # Camera streaming, canvas HUD, shutter burst, REST calls
+│   │   └── style.css             # Dark-themed responsive mobile CSS
+│   └── templates/
+│       └── index.html            # Mobile single-page UI (Live, Enroll, Directory)
+├── run_web.py                    # One-command mobile launcher (IP detection, SSL, QR code)
+├── main.py                       # Universal entrypoint (--web, webcam, or remote stream)
+├── live_server.py                # Desktop OpenCV live streaming & recognition server
 ├── capture.py                    # Threaded FrameSource & StreamConnectionError
 ├── database.py                   # SQLite DatabaseManager, StoredIdentity, Gallery
 ├── detector.py                   # FaceDetector wrapping InsightFace (ctx_id=-1)
@@ -180,8 +283,6 @@ FACE 2.0/
 ├── enrollment.py                 # Centroid aggregation & L2-normalization math
 ├── overlay.py                    # OverlayRenderer with solid badges & HUD
 ├── enroll.py                     # Offline multi-photo enrollment CLI
-├── live_server.py                # Main live streaming & recognition server
-├── main.py                       # Convenient default launcher
 ├── pytest.ini                    # Pytest configuration
 ├── users.db                      # Local SQLite biometric database
 └── tests/

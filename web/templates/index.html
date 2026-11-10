@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#0f172a">
+  <title>FACE 2.0 | Mobile Biometric Suite</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="app-root">
+    <!-- Main Screens Container -->
+    <main class="main-content">
+      
+      <!-- ========================================== -->
+      <!-- SCREEN 1: LIVE RECOGNITION                -->
+      <!-- ========================================== -->
+      <section id="tab-live" class="tab-screen active" aria-label="Live Recognition">
+        <!-- Top Floating HUD Bar -->
+        <header class="top-floating-bar glass-panel">
+          <div class="status-indicator-pill">
+            <span id="streamStatusDot" class="status-dot"></span>
+            <span id="streamStatusText" class="status-text">Connecting...</span>
+            <span class="status-sep">•</span>
+            <span id="streamFps" class="fps-text">0.0 FPS</span>
+          </div>
+
+          <div class="floating-actions">
+            <!-- Flip Camera Button -->
+            <button id="btnFlipCamera" class="icon-btn" title="Flip Camera" aria-label="Flip Camera">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M20 10c0-4.418-3.582-8-8-8s-8 3.582-8 8c0 2.21 0.895 4.21 2.343 5.657L4 18h6v-6l-2.343 2.343C6.613 13.297 6 11.724 6 10c0-3.314 2.686-6 6-6s6 2.686 6 6c0 1.724-0.613 3.297-1.657 4.343L18 16l4-4z"/>
+                <path d="M4 14c0 4.418 3.582 8 8 8s8-3.582 8-8c0-2.21-0.895-4.21-2.343-5.657L20 6h-6v6l2.343-2.343C17.387 10.703 18 12.276 18 14c0 3.314-2.686 6-6 6s-6-2.686-6-6c0-1.724 0.613-3.297 1.657-4.343L6 8l-4 4z"/>
+              </svg>
+            </button>
+
+            <!-- Start / Stop Toggle Button -->
+            <button id="btnToggleStream" class="icon-btn" title="Pause/Resume Stream" aria-label="Pause/Resume Stream">
+              <svg id="iconStreamPause" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="6" y="4" width="4" height="16" rx="1"/>
+                <rect x="14" y="4" width="4" height="16" rx="1"/>
+              </svg>
+              <svg id="iconStreamPlay" class="hidden" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                <polygon points="5 3 19 12 5 21 5 3"/>
+              </svg>
+            </button>
+          </div>
+        </header>
+
+        <!-- Viewport Video Container -->
+        <div class="video-container" id="videoContainer">
+          <video id="cameraVideo" playsinline autoplay muted></video>
+          <canvas id="overlayCanvas"></canvas>
+
+          <!-- Camera Loading / Offline Placeholder -->
+          <div id="cameraPlaceholder" class="camera-placeholder hidden">
+            <div class="placeholder-spinner"></div>
+            <p id="placeholderText">Accessing camera...</p>
+          </div>
+        </div>
+
+        <!-- Slide-Up Bottom Card for Recognized Identity -->
+        <div id="recognizedCard" class="slide-card glass-panel" aria-live="polite">
+          <div class="card-drag-indicator"></div>
+          <div class="card-header">
+            <div class="card-identity-badge">
+              <div class="avatar-circle" id="recogAvatar">
+                <span id="recogInitials">?</span>
+              </div>
+              <div class="identity-text">
+                <div class="identity-row">
+                  <h3 id="recogName" class="identity-name">Scanning...</h3>
+                  <span id="recogScore" class="score-badge">0% Match</span>
+                </div>
+                <div class="role-row">
+                  <span id="recogRole" class="role-pill">Visitor</span>
+                </div>
+              </div>
+            </div>
+            <button id="btnCloseCard" class="icon-btn-sm" aria-label="Dismiss Card">&times;</button>
+          </div>
+
+          <div class="card-body">
+            <!-- Match Confidence Progress Bar -->
+            <div class="confidence-container">
+              <div class="confidence-label-row">
+                <span>Confidence Score</span>
+                <span id="recogConfidenceValue">0.00</span>
+              </div>
+              <div class="confidence-track">
+                <div id="recogScoreBar" class="confidence-fill" style="width: 0%;"></div>
+              </div>
+            </div>
+
+            <!-- Metadata / Notes -->
+            <div id="recogDetails" class="identity-details">
+              <div class="detail-item">
+                <span class="detail-label">Notes:</span>
+                <span id="recogNotes" class="detail-value">—</span>
+              </div>
+              <div class="detail-item">
+                <span class="detail-label">Status:</span>
+                <span id="recogStatus" class="detail-value text-emerald">Verified Identity</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========================================== -->
+      <!-- SCREEN 2: ENROLLMENT STUDIO               -->
+      <!-- ========================================== -->
+      <section id="tab-enroll" class="tab-screen" aria-label="Enroll User">
+        <header class="screen-header">
+          <h1 class="screen-title">Enrollment Studio</h1>
+          <p class="screen-subtitle">Generate biometric templates for face recognition</p>
+          
+          <!-- Segmented Control: Camera Shutter vs Gallery Upload -->
+          <div class="segmented-control glass-panel" role="tablist">
+            <button type="button" id="segment-shutter" class="segment-btn active" role="tab" aria-selected="true">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                <circle cx="12" cy="13" r="4"/>
+              </svg>
+              <span>Camera Shutter</span>
+            </button>
+            <button type="button" id="segment-gallery" class="segment-btn" role="tab" aria-selected="false">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                <circle cx="8.5" cy="8.5" r="1.5"/>
+                <polyline points="21 15 16 10 5 21"/>
+              </svg>
+              <span>Gallery Upload</span>
+            </button>
+          </div>
+        </header>
+
+        <!-- SUB-VIEW A: CAMERA SHUTTER -->
+        <div id="enroll-shutter-view" class="enroll-subview active">
+          <!-- Viewfinder Container with Oval Alignment Guide -->
+          <div class="shutter-viewfinder-container">
+            <video id="enrollVideo" playsinline autoplay muted></video>
+            
+            <!-- Face Alignment Guide Overlay -->
+            <div class="face-guide-overlay">
+              <div class="guide-oval">
+                <div class="guide-crosshair horizontal"></div>
+                <div class="guide-crosshair vertical"></div>
+              </div>
+              <div class="guide-hint">Align face inside the oval</div>
+            </div>
+
+            <!-- Viewfinder Flash Effect -->
+            <div id="viewfinderFlash" class="viewfinder-flash"></div>
+
+            <!-- Quick Flip button on viewfinder -->
+            <button id="btnEnrollFlip" class="viewfinder-flip-btn" title="Switch Camera" aria-label="Switch Camera">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M20 10c0-4.418-3.582-8-8-8s-8 3.582-8 8c0 2.21 0.895 4.21 2.343 5.657L4 18h6v-6l-2.343 2.343C6.613 13.297 6 11.724 6 10c0-3.314 2.686-6 6-6s6 2.686 6 6c0 1.724-0.613 3.297-1.657 4.343L18 16l4-4z"/>
+              </svg>
+            </button>
+          </div>
+
+          <!-- Shutter Button & Controls -->
+          <div class="shutter-action-area">
+            <button type="button" id="btnShutter" class="shutter-btn" aria-label="Take Photo">
+              <div class="shutter-inner"></div>
+            </button>
+            <div class="shutter-badge-row">
+              <span id="shutterCountBadge" class="count-badge">Photos: 0 / 5 (Min 3)</span>
+              <button type="button" id="btnClearShutterPhotos" class="btn-text-danger hidden">Clear All</button>
+            </div>
+          </div>
+
+          <!-- Horizontal Thumbnail Strip -->
+          <div class="thumbnail-strip-section">
+            <div class="thumbnail-strip-header">
+              <span class="section-label">Captured Angle Samples</span>
+              <span id="thumbnailCountLabel" class="section-hint">0 captured</span>
+            </div>
+            <div id="shutterThumbnails" class="thumbnail-strip" tabindex="0">
+              <div class="thumbnail-placeholder" id="thumbnailPlaceholder">
+                <span>No photos captured yet.<br>Tap the circular shutter to capture 3–5 angles.</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Enrollment Form Fields -->
+          <form id="shutterEnrollForm" class="enroll-form">
+            <div class="form-group">
+              <label for="shutterName">Full Name <span class="required">*</span></label>
+              <input type="text" id="shutterName" class="form-input" placeholder="e.g., Alex Vance" required autocomplete="off">
+            </div>
+
+            <div class="form-group">
+              <label for="shutterRole">Role / Title</label>
+              <input type="text" id="shutterRole" class="form-input" placeholder="e.g., Senior Engineer, Security Lead" autocomplete="off">
+            </div>
+
+            <div class="form-group">
+              <label for="shutterNotes">Notes / Metadata</label>
+              <textarea id="shutterNotes" class="form-textarea" rows="2" placeholder="e.g., Department, Clearance Level, Shift"></textarea>
+            </div>
+
+            <button type="submit" id="btnSaveEnrollCaptures" class="btn btn-primary btn-block">
+              <span class="btn-label">Save & Enroll Identity</span>
+              <span class="btn-spinner hidden"></span>
+            </button>
+          </form>
+        </div>
+
+        <!-- SUB-VIEW B: GALLERY UPLOAD -->
+        <div id="enroll-gallery-view" class="enroll-subview">
+          <div class="gallery-dropzone" id="galleryDropzone">
+            <input type="file" id="galleryFileInput" class="file-input-hidden" multiple accept="image/*">
+            <div class="dropzone-icon">
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+            </div>
+            <h3 class="dropzone-title">Select Face Photos</h3>
+            <p class="dropzone-desc">Choose 3 or more clear portrait photos from device storage</p>
+            <button type="button" id="btnSelectFiles" class="btn btn-outline">Browse Files</button>
+          </div>
+
+          <!-- Preview Grid of Selected Files -->
+          <div class="gallery-preview-section">
+            <div class="thumbnail-strip-header">
+              <span class="section-label">Selected Files</span>
+              <span id="galleryCountLabel" class="section-hint">0 selected</span>
+            </div>
+            <div id="galleryPreviewGrid" class="gallery-grid">
+              <div class="gallery-empty-msg" id="galleryEmptyMsg">No images selected yet.</div>
+            </div>
+          </div>
+
+          <!-- Gallery Enrollment Form Fields -->
+          <form id="galleryEnrollForm" class="enroll-form">
+            <div class="form-group">
+              <label for="galleryName">Full Name <span class="required">*</span></label>
+              <input type="text" id="galleryName" class="form-input" placeholder="e.g., Sarah Connor" required autocomplete="off">
+            </div>
+
+            <div class="form-group">
+              <label for="galleryRole">Role / Title</label>
+              <input type="text" id="galleryRole" class="form-input" placeholder="e.g., Operations Specialist" autocomplete="off">
+            </div>
+
+            <div class="form-group">
+              <label for="galleryNotes">Notes / Metadata</label>
+              <textarea id="galleryNotes" class="form-textarea" rows="2" placeholder="e.g., Facility Access, Team ID"></textarea>
+            </div>
+
+            <button type="submit" id="btnUploadEnrollGallery" class="btn btn-primary btn-block">
+              <span class="btn-label">Upload & Enroll</span>
+              <span class="btn-spinner hidden"></span>
+            </button>
+          </form>
+        </div>
+      </section>
+
+      <!-- ========================================== -->
+      <!-- SCREEN 3: DIRECTORY                       -->
+      <!-- ========================================== -->
+      <section id="tab-directory" class="tab-screen" aria-label="Biometric Directory">
+        <header class="screen-header">
+          <div class="header-split">
+            <div>
+              <h1 class="screen-title">Biometric Directory</h1>
+              <p class="screen-subtitle">Manage enrolled identities and vectors</p>
+            </div>
+            <button type="button" id="btnRefreshDirectory" class="icon-btn" title="Refresh Directory" aria-label="Refresh Directory">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="23 4 23 10 17 10"/>
+                <polyline points="1 20 1 14 7 14"/>
+                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+              </svg>
+            </button>
+          </div>
+
+          <!-- Search Input Box -->
+          <div class="search-box glass-panel">
+            <svg class="search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="8"/>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            </svg>
+            <input type="search" id="directorySearch" class="search-input" placeholder="Search by name, role, or notes..." autocomplete="off">
+            <button type="button" id="btnClearSearch" class="clear-search-btn hidden" aria-label="Clear Search">&times;</button>
+          </div>
+        </header>
+
+        <!-- Directory Status Counter -->
+        <div class="directory-meta-bar">
+          <span id="directoryCountBadge" class="meta-badge">0 Enrolled</span>
+          <span id="directoryFilterHint" class="meta-hint">Showing all records</span>
+        </div>
+
+        <!-- Directory Members List -->
+        <div id="directoryList" class="directory-list">
+          <!-- Dynamically populated member cards -->
+        </div>
+
+        <!-- Empty State Message -->
+        <div id="directoryEmptyState" class="empty-state hidden">
+          <div class="empty-icon">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+              <circle cx="9" cy="7" r="4"/>
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+              <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+            </svg>
+          </div>
+          <h3 id="emptyTitle">No Members Found</h3>
+          <p id="emptyDesc">No enrolled identities match your query.</p>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- ========================================== -->
+    <!-- BOTTOM TAB NAVIGATION                      -->
+    <!-- ========================================== -->
+    <nav class="bottom-nav glass-panel" aria-label="Application Navigation">
+      <button type="button" id="tab-live-btn" class="nav-tab active" data-target="tab-live" aria-selected="true">
+        <svg class="nav-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M15 10l5-3v10l-5-3v-4z"/>
+          <rect x="2" y="6" width="13" height="12" rx="2"/>
+        </svg>
+        <span class="nav-label">Live</span>
+      </button>
+
+      <button type="button" id="tab-enroll-btn" class="nav-tab" data-target="tab-enroll" aria-selected="false">
+        <svg class="nav-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+          <circle cx="8.5" cy="7" r="4"/>
+          <line x1="20" y1="8" x2="20" y2="14"/>
+          <line x1="23" y1="11" x2="17" y2="11"/>
+        </svg>
+        <span class="nav-label">Enroll</span>
+      </button>
+
+      <button type="button" id="tab-directory-btn" class="nav-tab" data-target="tab-directory" aria-selected="false">
+        <svg class="nav-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+          <circle cx="9" cy="7" r="4"/>
+          <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+          <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+        </svg>
+        <span class="nav-label">Directory</span>
+      </button>
+    </nav>
+
+    <!-- ========================================== -->
+    <!-- TOAST NOTIFICATION SYSTEM                  -->
+    <!-- ========================================== -->
+    <div id="toastContainer" class="toast-container" aria-live="assertive"></div>
+
+    <!-- ========================================== -->
+    <!-- CONFIRMATION MODAL                         -->
+    <!-- ========================================== -->
+    <div id="confirmModal" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+      <div class="modal-card glass-panel">
+        <div class="modal-icon-warning">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+            <line x1="12" y1="9" x2="12" y2="13"/>
+            <line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+        </div>
+        <h3 class="modal-title">Confirm Deletion</h3>
+        <p class="modal-message">
+          Are you sure you want to permanently delete <strong id="deleteTargetName">identity</strong>? All stored biometric templates will be erased.
+        </p>
+        <div class="modal-actions">
+          <button type="button" id="btnCancelDelete" class="btn btn-secondary">Cancel</button>
+          <button type="button" id="btnConfirmDelete" class="btn btn-danger">Delete Identity</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Hidden Offscreen Canvas for Frame Extraction -->
+    <canvas id="hiddenFrameCanvas" class="hidden"></canvas>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

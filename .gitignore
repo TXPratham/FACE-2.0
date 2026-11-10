@@ -12,6 +12,12 @@ __pycache__/
 *.db-journal
 *.sqlite3
 
+# SSL Certificates & Private Keys
+certs/
+*.pem
+*.key
+*.crt
+
 # Environment & IDE
 .vscode/
 .idea/
