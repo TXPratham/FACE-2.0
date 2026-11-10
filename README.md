@@ -1,24 +1,23 @@
-# Remote Face Recognition 2.0 (Mobile Web & Client–Server)
+# Remote Face Recognition 2.0 (In-Browser Mobile Camera)
 
-A real-time, cross-platform face recognition and enrollment system built for **Google Antigravity's Spec-Driven Development workflow**.
-
-Transform any smartphone into an instant biometric recognition terminal with **Zero App Installation**:
-- Simply run `python run_web.py` (or `python main.py --web`), scan the terminal QR code with your phone camera, and open the mobile web dashboard in Chrome or Safari!
-- Live in-browser camera streaming over WebSockets, real-time bounding boxes and identity badges, phone shutter/gallery enrollment, and member directory management.
-- Also supports the classic desktop OpenCV HUD against phone MJPEG streams or local webcams (`python main.py`).
+A real-time face recognition and enrollment system where **your smartphone's camera opens directly inside the mobile web browser**:
+- **Zero Third-Party Apps Required:** No "IP Webcam" or third-party camera apps needed on your phone. The camera opens natively right inside mobile Safari or Chrome!
+- **No IP Address Typing:** The terminal prints an instant ASCII QR code. Just point your phone camera at your laptop screen and tap to open!
+- **One Command to Run Everything:** Simply run `python main.py` (or `python run_web.py`) on your laptop.
+- **In-Browser ML Camera Stream:** High-speed WebSocket streaming from your mobile browser to the laptop's InsightFace ArcFace 512-D inference engine.
+- **In-Browser Face Enrollment & Directory:** Snap multi-photo bursts with the camera shutter button or upload photos from your phone gallery to enroll new members under their name and details.
 
 ---
 
 ## Architecture Topology
 
-### 1. Mobile Web Mode (`run_web.py` / `main.py --web`)
 ```
 ┌──────────────────────────────────────────────┐                 WebSockets & REST (HTTPS)            ┌───────────────────────────────────────────────┐
 │        Smartphone (Chrome / Safari)          │ ───────────────────────────────────────────────────▶ │         Laptop (Uvicorn / FastAPI Backend)    │
-│  - No App Required! HTML5 Single-Page App    │                 https://<lan-ip>:8000                │                                               │
-│  - Camera: navigator.mediaDevices.getUserMedia│                                                      │  1. run_web.py (LAN IP & Auto-SSL & QR Code)  │
-│  - Real-time Canvas HUD Bounding Boxes       │ ◀─────────────────────────────────────────────────── │  2. web/server.py (WebSocket /ws/recognize)   │
-│  - Shutter Burst & Gallery Upload Enrollment │                  JSON Bboxes & Metadata              │  3. detector.FaceDetector (InsightFace)       │
+│  * NO 3RD-PARTY APP! HTML5 Browser App       │                 https://<lan-ip>:8000                │                                               │
+│  * Camera opens via getUserMedia directly    │                 or https://<laptop>.local:8000       │  1. run_web.py (LAN IP & Auto-SSL & QR Code)  │
+│  * Real-time Canvas HUD Bounding Boxes       │ ◀─────────────────────────────────────────────────── │  2. web/server.py (WebSocket /ws/recognize)   │
+│  * Shutter Burst & Gallery Upload Enrollment │                  JSON Bboxes & Metadata              │  3. detector.FaceDetector (InsightFace)       │
 └──────────────────────────────────────────────┘                                                      │  4. recognizer.ArcFaceRecognizer (512-D Arc)  │
                                                                                                       │  5. matcher.CosineMatcher (Matrix Dot-Product)│
                                                                                                       └──────────────────────┬────────────────────────┘
@@ -31,41 +30,21 @@ Transform any smartphone into an instant biometric recognition terminal with **Z
                                                                                                       └───────────────────────────────────────────────┘
 ```
 
-### 2. Desktop MJPEG / Local Webcam Mode (`main.py` / `live_server.py`)
-```
-┌─────────────────────────────────┐                 MJPEG over HTTP                 ┌───────────────────────────────────────────────┐
-│     Smartphone (Remote Sensor)  │ ──────────────────────────────────────────────▶ │        Laptop (Python ML Inference Server)    │
-│  - IP Webcam App                │           http://<phone-ip>:8080/video          │                                               │
-│  - Connected to Local Wi-Fi     │                                                 │  1. capture.FrameSource (Threaded Grabber)    │
-└─────────────────────────────────┘                                                 │  2. detector.FaceDetector (InsightFace)       │
-                                                                                    │  3. recognizer.ArcFaceRecognizer (512-D Arc)  │
-                                                                                    │  4. matcher.CosineMatcher (Matrix Dot-Product)│
-                                                                                    │  5. overlay.OverlayRenderer (HUD + Badges)    │
-                                                                                    └──────────────────────┬────────────────────────┘
-                                                                                                           │
-                                                                                    ┌──────────────────────▼────────────────────────┐
-                                                                                    │      Local SQLite Database (users.db)         │
-                                                                                    │   - 512-D float32 embedding BLOBs             │
-                                                                                    │   - Multi-photo Centroid Master Templates     │
-                                                                                    │   - Metadata & Role Attributes                │
-                                                                                    └───────────────────────────────────────────────┘
-```
-
 ---
 
-## Quickstart: One-Command Mobile Launch (Recommended)
+## One-Command Startup (Recommended)
 
-### 1. Launch Mobile Web Server
+### Run the System
 ```bash
-python run_web.py
+python main.py
 ```
-*(or simply run `python main.py --web`)*
+*(or `python run_web.py`)*
 
-When launched, `run_web.py` automatically:
-1. Detects your laptop's local LAN Wi-Fi IP address (e.g., `192.168.1.42` or `10.x.x.x`).
-2. Auto-generates self-signed SSL certificates (`certs/cert.pem` and `certs/key.pem`) with Subject Alternative Names (SAN) so mobile browsers permit camera hardware access.
-3. Renders a scannable ASCII QR code in the terminal pointing directly to `https://<laptop-ip>:8000`.
-4. Starts the high-speed Uvicorn ASGI server.
+When launched, the server automatically:
+1. Detects your laptop's local LAN Wi-Fi IP and local mDNS hostname (`https://<hostname>.local:8000`).
+2. Auto-generates self-signed SSL certificates (`certs/cert.pem` and `certs/key.pem`) so mobile browsers permit camera hardware access.
+3. Renders a scannable ASCII QR code in the terminal.
+4. Starts the high-speed ASGI server.
 
 ```text
 ========================================================================
@@ -78,8 +57,10 @@ When launched, `run_web.py` automatically:
 ------------------------------------------------------------------------
   [>] Local URL:     https://localhost:8000
   [>] Mobile LAN URL:https://192.168.1.42:8000
+  [>] Mobile mDNS:   https://LAPTOP-HL5I2OR5.local:8000
 ------------------------------------------------------------------------
-  SCAN WITH SMARTPHONE CAMERA TO LAUNCH INSTANTLY:
+  * NO THIRD-PARTY APPS NEEDED: Camera opens directly in mobile browser!
+  * NO IP ADDRESS TYPING: Point your smartphone camera at this QR code:
 
     █████████████████████████████
     ██  ███████  ███  ███████  ██
@@ -88,13 +69,14 @@ When launched, `run_web.py` automatically:
     █████████████████████████████
 
 ------------------------------------------------------------------------
-  MOBILE USAGE TIPS:
-  1. Ensure phone & laptop are connected to the SAME Wi-Fi network.
-  2. Scan the QR code with phone camera or open: https://<laptop-ip>:8000
+  MOBILE USAGE:
+  1. Ensure phone & laptop are on the SAME Wi-Fi network.
+  2. Point your phone camera at the QR code above and tap to open.
   3. First-time SSL warning (normal for self-signed certificates):
-     - iOS Safari:   Tap 'Show Details' -> 'visit this website'.
+     - iOS Safari:     Tap 'Show Details' -> 'visit this website'.
      - Android Chrome: Tap 'Advanced' -> 'Proceed to site (unsafe)'.
   4. Tap 'Allow' when the browser asks for Camera access.
+  5. The camera opens directly in the web page—no apps to download!
 ========================================================================
 ```
 

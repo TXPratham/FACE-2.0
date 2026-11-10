@@ -1,11 +1,11 @@
 """main.py - Main entrypoint for Remote Face Recognition (FACE 2.0).
 
-Supports two primary modes:
-1. Mobile Web Server (`--web` or auto-fallback if no webcam):
-   Launches the browser-based face recognition & enrollment suite with
-   automatic local IP detection, self-signed SSL, and terminal QR code.
-2. Desktop Live Pipeline (default with webcam or MJPEG URL):
-   Launches OpenCV window against a local webcam or remote MJPEG stream.
+By default, launches the Mobile Web Server:
+- Zero third-party apps required on the phone (no 'IP Webcam' app).
+- Mobile browser opens the camera directly inside the web page.
+- No IP typing needed: just scan the terminal QR code with your smartphone camera.
+- Streams camera frames to laptop via WebSockets for real-time ArcFace recognition.
+- Supports in-browser multi-photo capture and gallery upload enrollment.
 """
 
 from __future__ import annotations
@@ -14,30 +14,32 @@ import argparse
 import logging
 import sys
 
-from capture import StreamConnectionError
-from live_server import RecognitionPipeline
-
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("main")
 
 
 def main() -> None:
-    """Launch either the Mobile Web Server or Desktop Live Recognition Pipeline."""
+    """Launch Mobile Web Server by default, or Desktop OpenCV mode if specified."""
     parser = argparse.ArgumentParser(
-        description="Remote Face Recognition 2.0 - Live Server Launcher"
+        description="Remote Face Recognition 2.0 - Browser-based in-phone camera recognition & enrollment."
     )
     # Mode selection
     parser.add_argument(
         "--web",
         action="store_true",
-        help="Launch the mobile web recognition and enrollment server (recommended).",
+        default=True,
+        help="Run mobile web server (default).",
     )
-    # Desktop live stream args
+    parser.add_argument(
+        "--desktop",
+        action="store_true",
+        help="Run legacy desktop OpenCV window instead of the mobile browser server.",
+    )
     parser.add_argument(
         "--stream-url",
         type=str,
         default="0",
-        help="MJPEG HTTP stream URL (e.g., http://192.168.1.5:8080/video) or webcam device index (default: '0').",
+        help="Desktop mode only: MJPEG stream URL or webcam device index (default: '0').",
     )
     # Shared inference options
     parser.add_argument(
@@ -84,57 +86,37 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    # 1. Direct Web Server Launch
-    if args.web:
-        logger.info("Launching Mobile Face Recognition & Enrollment Web Server...")
-        from run_web import run_server
+    # If --desktop is requested, run legacy desktop pipeline
+    if args.desktop:
+        from capture import StreamConnectionError
+        from live_server import RecognitionPipeline
 
-        run_server(
-            host=args.host,
-            port=args.port,
-            http=args.http,
-            threshold=args.threshold,
-            db_path=args.db,
-            ctx_id=args.ctx_id,
-            reload=args.reload,
-        )
-        return
-
-    # 2. Desktop Live Recognition Pipeline with auto-fallback to web server
-    try:
-        logger.info("Starting Desktop Live Recognition Pipeline (stream source: %s)...", args.stream_url)
-        pipeline = RecognitionPipeline(
-            stream_url=args.stream_url,
-            threshold=args.threshold,
-            db_path=args.db,
-            ctx_id=args.ctx_id,
-        )
-        pipeline.run()
-    except StreamConnectionError as exc:
-        logger.warning(
-            "Could not connect to video source '%s': %s",
-            args.stream_url,
-            exc,
-        )
-        # If webcam 0 failed, auto-fallback to web server for seamless smartphone access
-        if args.stream_url == "0":
-            logger.info(
-                "Local webcam (0) unavailable. Auto-launching Mobile Web Server so you can "
-                "instantly use your smartphone camera instead..."
-            )
-            from run_web import run_server
-
-            run_server(
-                host=args.host,
-                port=args.port,
-                http=args.http,
+        try:
+            logger.info("Starting Desktop OpenCV Pipeline (stream source: %s)...", args.stream_url)
+            pipeline = RecognitionPipeline(
+                stream_url=args.stream_url,
                 threshold=args.threshold,
                 db_path=args.db,
                 ctx_id=args.ctx_id,
-                reload=args.reload,
             )
-        else:
+            pipeline.run()
+        except StreamConnectionError as exc:
+            logger.error("Could not connect to desktop video source '%s': %s", args.stream_url, exc)
             sys.exit(1)
+        return
+
+    # DEFAULT MODE: Mobile Web Server (Browser opens phone camera directly)
+    from run_web import run_server
+
+    run_server(
+        host=args.host,
+        port=args.port,
+        http=args.http,
+        threshold=args.threshold,
+        db_path=args.db,
+        ctx_id=args.ctx_id,
+        reload=args.reload,
+    )
 
 
 if __name__ == "__main__":

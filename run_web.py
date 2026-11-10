@@ -229,6 +229,8 @@ def print_banner(
     """Print an attractive, clear startup banner with URLs and QR code."""
     local_url = f"{proto}://localhost:{port}"
     mobile_url = f"{proto}://{lan_ip}:{port}"
+    hostname = socket.gethostname()
+    mdns_url = f"{proto}://{hostname}.local:{port}"
     ssl_active = proto == "https"
 
     divider = "=" * 72
@@ -244,13 +246,15 @@ def print_banner(
     print(subdivider, flush=True)
     print(f"  [>] Local URL:     {local_url}", flush=True)
     print(f"  [>] Mobile LAN URL:{mobile_url}", flush=True)
+    print(f"  [>] Mobile mDNS:   {mdns_url}", flush=True)
     print(subdivider, flush=True)
-    print("  SCAN WITH SMARTPHONE CAMERA TO LAUNCH INSTANTLY:\n", flush=True)
+    print("  * NO THIRD-PARTY APPS NEEDED: Camera opens directly in mobile browser!", flush=True)
+    print("  * NO IP ADDRESS TYPING: Point your smartphone camera at this QR code:\n", flush=True)
     print(qr_ascii, flush=True)
     print("\n" + subdivider, flush=True)
     print("  MOBILE SETUP & USAGE TIPS:", flush=True)
     print("  1. Ensure phone & laptop are connected to the SAME Wi-Fi network.", flush=True)
-    print(f"  2. Open the Mobile LAN URL: {mobile_url}", flush=True)
+    print(f"  2. Scan the QR code above or open: {mobile_url}", flush=True)
     if ssl_active:
         print("  3. Self-Signed SSL Security Warning (Normal on first connection):", flush=True)
         print("     - iOS Safari:   Tap 'Show Details' -> 'visit this website'.", flush=True)
