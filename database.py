@@ -218,10 +218,13 @@ class DatabaseManager:
         """Provide a transactional SQLite connection context manager.
 
         Yields:
-            sqlite3.Connection: Connected database connection with foreign keys enabled.
+            sqlite3.Connection: Connected database connection with foreign keys and WAL enabled.
         """
-        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        conn = sqlite3.connect(self.db_path, timeout=30.0, check_same_thread=False)
         try:
+            conn.execute("PRAGMA journal_mode = WAL;")
+            conn.execute("PRAGMA busy_timeout = 5000;")
+            conn.execute("PRAGMA synchronous = NORMAL;")
             conn.execute("PRAGMA foreign_keys = ON;")
             yield conn
             conn.commit()

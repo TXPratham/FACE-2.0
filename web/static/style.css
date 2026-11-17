@@ -129,6 +129,7 @@ input, textarea, p, h1, h2, h3, h4, span {
   -webkit-backdrop-filter: var(--glass-blur);
   border-bottom: 1px solid var(--glass-border);
   z-index: 10;
+  flex-shrink: 0;
 }
 
 .screen-title {
@@ -466,8 +467,10 @@ input, textarea, p, h1, h2, h3, h4, span {
 
 #tab-enroll {
   background-color: var(--bg-primary);
-  overflow-y: auto;
+  overflow-y: auto !important;
   -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+  touch-action: pan-y;
 }
 
 /* Segmented Control */
@@ -510,8 +513,9 @@ input, textarea, p, h1, h2, h3, h4, span {
 .enroll-subview {
   display: none;
   flex-direction: column;
-  padding: 16px;
-  padding-bottom: 32px;
+  padding: 16px 16px calc(var(--bottom-nav-height) + var(--safe-bottom) + 90px) 16px;
+  min-height: max-content;
+  flex-shrink: 0;
 }
 
 .enroll-subview.active {
@@ -529,6 +533,7 @@ input, textarea, p, h1, h2, h3, h4, span {
   background-color: #000;
   border: 1px solid var(--glass-border);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  touch-action: pan-y;
 }
 
 #enrollVideo {
@@ -610,6 +615,43 @@ input, textarea, p, h1, h2, h3, h4, span {
   justify-content: center;
   cursor: pointer;
   z-index: 5;
+  transition: all 0.2s ease;
+}
+
+.viewfinder-flip-btn:active {
+  transform: scale(0.92);
+}
+
+.viewfinder-torch-btn {
+  position: absolute;
+  top: 10px;
+  right: 58px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgba(15, 23, 42, 0.7);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--glass-border-bright);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 5;
+  transition: all 0.2s ease;
+}
+
+.viewfinder-torch-btn:active {
+  transform: scale(0.92);
+}
+
+/* Torch Active Highlighting (for both floating top bar and viewfinder) */
+.icon-btn.torch-active,
+.viewfinder-torch-btn.torch-active {
+  background: rgba(245, 158, 11, 0.35) !important;
+  border-color: #f59e0b !important;
+  color: #fbbf24 !important;
+  box-shadow: 0 0 14px rgba(245, 158, 11, 0.5) !important;
 }
 
 .viewfinder-flash {
@@ -701,6 +743,7 @@ input, textarea, p, h1, h2, h3, h4, span {
 .thumbnail-strip-section {
   width: 100%;
   margin-bottom: 16px;
+  touch-action: pan-y;
 }
 
 .thumbnail-strip-header {
@@ -798,6 +841,7 @@ input, textarea, p, h1, h2, h3, h4, span {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  touch-action: pan-y;
 }
 
 .form-group {
@@ -921,6 +965,7 @@ input, textarea, p, h1, h2, h3, h4, span {
   cursor: pointer;
   margin-bottom: 16px;
   transition: border-color 0.2s ease, background 0.2s ease;
+  touch-action: pan-y;
 }
 
 .gallery-dropzone.dragover {
@@ -952,6 +997,14 @@ input, textarea, p, h1, h2, h3, h4, span {
 /* Gallery Grid */
 .gallery-preview-section {
   margin-bottom: 16px;
+  touch-action: pan-y;
+}
+
+/* Enrollment Form Submit Clearance */
+#btnSaveEnrollCaptures,
+#btnUploadEnrollGallery {
+  margin-top: 8px;
+  margin-bottom: 24px;
 }
 
 .gallery-grid {

@@ -28,6 +28,16 @@
           </div>
 
           <div class="floating-actions">
+            <!-- Torch / Flashlight Button -->
+            <button id="btnToggleTorch" class="icon-btn hidden" title="Toggle Flashlight / Torch" aria-label="Toggle Flashlight / Torch">
+              <svg id="iconTorchOff" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+              </svg>
+              <svg id="iconTorchOn" class="hidden" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+              </svg>
+            </button>
+
             <!-- Flip Camera Button -->
             <button id="btnFlipCamera" class="icon-btn" title="Flip Camera" aria-label="Flip Camera">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -154,6 +164,13 @@
 
             <!-- Viewfinder Flash Effect -->
             <div id="viewfinderFlash" class="viewfinder-flash"></div>
+
+            <!-- Quick Torch button on viewfinder -->
+            <button id="btnEnrollTorch" class="viewfinder-torch-btn hidden" title="Toggle Flashlight / Torch" aria-label="Toggle Flashlight / Torch">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+              </svg>
+            </button>
 
             <!-- Quick Flip button on viewfinder -->
             <button id="btnEnrollFlip" class="viewfinder-flip-btn" title="Switch Camera" aria-label="Switch Camera">

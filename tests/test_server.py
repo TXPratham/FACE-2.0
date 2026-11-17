@@ -76,7 +76,9 @@ class TestServerEndpoints:
         client, _, _ = mock_vision_engine
         response = client.get("/api/members")
         assert response.status_code == 200
-        assert response.json() == {"members": []}
+        data = response.json()
+        assert data["members"] == []
+        assert "active_clients" in data
 
     def test_enroll_upload_success(self, mock_vision_engine) -> None:
         """Verify POST /api/enroll/upload processes files, computes master embedding, and saves."""
@@ -273,5 +275,114 @@ class TestWebSocketRecognition:
 
         with client.websocket_connect("/ws/recognize") as ws:
             ws.send_bytes(create_test_jpeg())
-            _ = ws.receive_json()
+            data = ws.receive_json()
+            assert "active_clients" in data
+            assert data["active_clients"] == 1
             # Exiting context closes the connection
+
+    def test_websocket_multi_client_active_count(self, mock_vision_engine) -> None:
+        """Verify multiple connected WebSockets track active_clients count accurately."""
+        client, _, _ = mock_vision_engine
+        jpeg_data = create_test_jpeg()
+
+        with client.websocket_connect("/ws/recognize") as ws1:
+            ws1.send_bytes(jpeg_data)
+            data1 = ws1.receive_json()
+            assert data1["active_clients"] == 1
+
+            with client.websocket_connect("/ws/recognize") as ws2:
+                ws2.send_bytes(jpeg_data)
+                data2 = ws2.receive_json()
+                assert data2["active_clients"] == 2
+
+                # ws1 sends another frame, should now report 2 active clients
+                ws1.send_bytes(jpeg_data)
+                data1_after = ws1.receive_json()
+                assert data1_after["active_clients"] == 2
+
+            # After ws2 disconnects, ws1 reports 1 active client
+            ws1.send_bytes(jpeg_data)
+            data1_final = ws1.receive_json()
+            assert data1_final["active_clients"] == 1
+
+    def test_connection_manager_standalone(self) -> None:
+        """Verify ConnectionManager standalone methods and properties."""
+        from web.server import ConnectionManager
+
+        mgr = ConnectionManager()
+        assert mgr.active_count == 0
+
+        mock_ws_1 = object()
+        mock_ws_2 = object()
+
+        id1 = mgr.connect(mock_ws_1)
+        assert isinstance(id1, str)
+        assert len(id1) == 32
+        assert mgr.active_count == 1
+
+        id2 = mgr.connect(mock_ws_2)
+        assert isinstance(id2, str)
+        assert id1 != id2
+        assert mgr.active_count == 2
+
+        mgr.disconnect(mock_ws_1)
+        assert mgr.active_count == 1
+
+        mgr.disconnect(mock_ws_2)
+        assert mgr.active_count == 0
+
+    def test_vision_engine_gallery_lock_thread_safety(self, tmp_path) -> None:
+        """Verify thread-safe reading and reloading of gallery under concurrent conditions."""
+        import concurrent.futures
+        import threading
+        from database import DatabaseManager, StoredIdentity
+        from web.server import VisionEngine, recognize_frame_sync
+
+        db_file = tmp_path / "lock_test.db"
+        detector = FaceDetector(mock=True, ctx_id=-1)
+        recognizer = ArcFaceRecognizer(mock=True, ctx_id=-1)
+        detector.set_mock_faces([FaceBox(bbox=(10, 10, 80, 80), score=0.98)])
+
+        engine = VisionEngine(
+            db_path=str(db_file),
+            ctx_id=-1,
+            threshold=0.55,
+            detector=detector,
+            recognizer=recognizer,
+        )
+        assert isinstance(engine._gallery_lock, threading.RLock().__class__)
+
+        dummy_frame = np.full((100, 100, 3), 128, dtype=np.uint8)
+        errors: list[Exception] = []
+
+        def reloader():
+            try:
+                for i in range(15):
+                    emb = np.ones(512, dtype=np.float32) / np.sqrt(512)
+                    engine.db.save(StoredIdentity(name=f"Member_{i}", master_embedding=emb))
+                    engine.reload_gallery()
+            except Exception as e:
+                errors.append(e)
+
+        def recognizer_worker():
+            try:
+                for _ in range(30):
+                    # Take snapshot reference under gallery lock
+                    gal = engine.gallery
+                    results = recognize_frame_sync(
+                        dummy_frame,
+                        engine.detector,
+                        engine.recognizer,
+                        engine.matcher,
+                        gal,
+                    )
+                    assert isinstance(results, list)
+            except Exception as e:
+                errors.append(e)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
+            f1 = executor.submit(reloader)
+            f2 = [executor.submit(recognizer_worker) for _ in range(4)]
+            concurrent.futures.wait([f1] + f2)
+
+        assert len(errors) == 0, f"Thread-safety test encountered errors: {errors}"

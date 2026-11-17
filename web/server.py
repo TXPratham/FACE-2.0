@@ -11,7 +11,9 @@ import json
 import logging
 import os
 import sys
+import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -55,6 +57,75 @@ TEMPLATES_DIR = BASE_DIR / "templates"
 
 
 # ============================================================================
+# MULTI-USER WEBSOCKET CONNECTION MANAGER
+# ============================================================================
+
+
+class ConnectionId(str):
+    """String subclass that allows both synchronous use and coroutine awaiting."""
+
+    def __new__(cls, value: str, websocket: WebSocket | None = None) -> ConnectionId:
+        instance = super().__new__(cls, value)
+        instance._ws = websocket
+        return instance
+
+    def __await__(self):
+        async def _resolve():
+            from starlette.websockets import WebSocketState
+            if self._ws is not None and getattr(self._ws, "client_state", None) == WebSocketState.CONNECTING:
+                await self._ws.accept()
+            return str(self)
+        return _resolve().__await__()
+
+
+class ConnectionManager:
+    """Maintains active set of connected WebSockets with unique connection IDs.
+
+    Thread-safe connection tracker for multi-client WebSocket connections.
+    """
+
+    def __init__(self) -> None:
+        """Initialize ConnectionManager with an empty tracking map and lock."""
+        self._connections: dict[WebSocket, str] = {}
+        self._lock = threading.Lock()
+
+    @property
+    def active_count(self) -> int:
+        """Return the count of currently active WebSocket connections."""
+        with self._lock:
+            return len(self._connections)
+
+    def connect(self, websocket: WebSocket) -> ConnectionId:
+        """Register a connected WebSocket with a unique connection ID.
+
+        Returns an awaitable ConnectionId string so it can be invoked either as:
+        `conn_id = manager.connect(websocket)` or
+        `conn_id = await manager.connect(websocket)`.
+        If awaited and the websocket has not yet been accepted, accepts it.
+        """
+        conn_id_str = uuid.uuid4().hex
+        with self._lock:
+            self._connections[websocket] = conn_id_str
+        logger.info(
+            "WebSocket client connected [conn_id=%s, active_clients=%d]",
+            conn_id_str,
+            len(self._connections),
+        )
+        return ConnectionId(conn_id_str, websocket)
+
+    def disconnect(self, websocket: WebSocket) -> None:
+        """Unregister a disconnected WebSocket cleanly."""
+        with self._lock:
+            conn_id = self._connections.pop(websocket, None)
+        if conn_id:
+            logger.info(
+                "WebSocket client disconnected [conn_id=%s, active_clients=%d]",
+                conn_id,
+                len(self._connections),
+            )
+
+
+# ============================================================================
 # VISION ENGINE CONTAINER
 # ============================================================================
 
@@ -69,8 +140,9 @@ class VisionEngine:
         threshold: float = 0.55,
         detector: FaceDetector | None = None,
         recognizer: ArcFaceRecognizer | None = None,
+        connection_manager: ConnectionManager | None = None,
     ) -> None:
-        """Initialize the core vision models and local database gallery.
+        """Initialize the core vision models, database gallery, and connection manager.
 
         Args:
             db_path: Path to SQLite database file (default: 'users.db').
@@ -78,6 +150,7 @@ class VisionEngine:
             threshold: Cosine similarity cutoff for identity verification (default: 0.55).
             detector: Optional pre-configured FaceDetector instance.
             recognizer: Optional pre-configured ArcFaceRecognizer instance.
+            connection_manager: Optional custom ConnectionManager instance.
         """
         self.db_path = str(db_path)
         self.ctx_id = ctx_id
@@ -87,7 +160,10 @@ class VisionEngine:
         self.detector = detector if detector is not None else FaceDetector(ctx_id=self.ctx_id)
         self.recognizer = recognizer if recognizer is not None else ArcFaceRecognizer(ctx_id=self.ctx_id)
         self.matcher = CosineMatcher(threshold=self.threshold)
-        self._gallery: Gallery = self.db.load_all()
+        self.connection_manager = connection_manager if connection_manager is not None else ConnectionManager()
+        self._gallery_lock = threading.RLock()
+        with self._gallery_lock:
+            self._gallery: Gallery = self.db.load_all()
 
         logger.info(
             "VisionEngine initialized [db='%s', ctx_id=%d, threshold=%.2f, gallery_size=%d]",
@@ -99,14 +175,18 @@ class VisionEngine:
 
     @property
     def gallery(self) -> Gallery:
-        """Return the current in-memory gallery cache."""
-        return self._gallery
+        """Return the current in-memory gallery cache in a thread-safe manner."""
+        with self._gallery_lock:
+            return self._gallery
 
     def reload_gallery(self) -> Gallery:
-        """Hot-reload enrolled identities from the SQLite database into memory."""
-        self._gallery = self.db.load_all()
-        logger.info("Gallery reloaded. Total enrolled members: %d", len(self._gallery))
-        return self._gallery
+        """Hot-reload enrolled identities from the SQLite database into memory with lock synchronization."""
+        new_gallery = self.db.load_all()
+        with self._gallery_lock:
+            self._gallery = new_gallery
+            total = len(self._gallery)
+        logger.info("Gallery reloaded. Total enrolled members: %d", total)
+        return new_gallery
 
 
 # ============================================================================
@@ -218,7 +298,7 @@ def recognize_frame_sync(
     detector: FaceDetector,
     recognizer: ArcFaceRecognizer,
     matcher: CosineMatcher,
-    gallery: Gallery,
+    gallery: Gallery | VisionEngine,
 ) -> list[dict[str, Any]]:
     """Synchronous CPU worker to detect faces, extract ArcFace embeddings, and match against gallery.
 
@@ -227,13 +307,16 @@ def recognize_frame_sync(
         detector: FaceDetector instance.
         recognizer: ArcFaceRecognizer instance.
         matcher: CosineMatcher instance.
-        gallery: Current Gallery index.
+        gallery: Current Gallery index or VisionEngine instance.
 
     Returns:
         List of detection result dictionaries containing bbox, name, score, is_known, and details.
     """
     if frame is None or frame.size == 0:
         return []
+
+    # Snapshot reference of gallery so concurrent modifications never race with inference
+    gallery_snapshot: Gallery = getattr(gallery, "gallery", gallery)
 
     faces = detector.detect(frame)
     if not faces:
@@ -243,7 +326,7 @@ def recognize_frame_sync(
     for face in faces:
         try:
             emb = recognizer.embed(frame, face)
-            match_res = matcher.match(emb, gallery)
+            match_res = matcher.match(emb, gallery_snapshot)
             detections.append({
                 "bbox": [int(face.left), int(face.top), int(face.right), int(face.bottom)],
                 "name": str(match_res.name),
@@ -348,6 +431,7 @@ def create_app(
         recognizer=recognizer,
     )
     app.state.engine = engine
+    app.state.connection_manager = engine.connection_manager
 
     # Setup CORS middleware
     app.add_middleware(
@@ -389,11 +473,11 @@ def create_app(
 
         Receives binary JPEG frame bytes or base64 JSON payload.
         Runs face detection and ArcFace matching in an async executor threadpool.
-        Returns detection bounding boxes, identities, scores, and calculated FPS.
+        Returns detection bounding boxes, identities, scores, calculated FPS, and active_clients count.
         Gracefully handles client disconnects without noisy tracebacks.
         """
-        await websocket.accept()
         app_engine: VisionEngine = websocket.app.state.engine
+        conn_id = await app_engine.connection_manager.connect(websocket)
 
         last_time = time.perf_counter()
         fps = 0.0
@@ -420,22 +504,27 @@ def create_app(
                     instant_fps = 1.0 / dt
                     fps = instant_fps if fps == 0.0 else (0.85 * fps + 0.15 * instant_fps)
 
+                active_count = app_engine.connection_manager.active_count
+
                 if frame is None:
                     await websocket.send_json({
                         "detections": [],
                         "fps": round(fps, 2),
                         "frame_width": 0,
                         "frame_height": 0,
+                        "active_clients": active_count,
                     })
                     continue
 
+                # Take a snapshot reference of the gallery under lock for thread-safe matching
+                gallery_snapshot = app_engine.gallery
                 detections = await run_in_threadpool(
                     recognize_frame_sync,
                     frame,
                     app_engine.detector,
                     app_engine.recognizer,
                     app_engine.matcher,
-                    app_engine.gallery,
+                    gallery_snapshot,
                 )
 
                 await websocket.send_json({
@@ -443,12 +532,15 @@ def create_app(
                     "fps": round(fps, 2),
                     "frame_width": int(frame.shape[1]),
                     "frame_height": int(frame.shape[0]),
+                    "active_clients": active_count,
                 })
         except WebSocketDisconnect:
-            logger.info("WebSocket client disconnected normally.")
+            logger.info("WebSocket client disconnected normally [%s].", conn_id)
         except Exception as exc:
             # Cleanly handle client abruptly closing the connection without traceback
-            logger.debug("WebSocket connection terminated: %s", exc)
+            logger.debug("WebSocket connection terminated [%s]: %s", conn_id, exc)
+        finally:
+            app_engine.connection_manager.disconnect(websocket)
 
     # ------------------------------------------------------------------------
     # ROUTES: REST ENROLLMENT (IMAGE UPLOAD)
@@ -632,7 +724,10 @@ def create_app(
             }
             for identity in app_engine.gallery.identities
         ]
-        return {"members": members}
+        return {
+            "members": members,
+            "active_clients": app_engine.connection_manager.active_count,
+        }
 
     @app.delete("/api/members/{name}")
     async def delete_member(name: str, request: Request) -> dict[str, Any]:

@@ -113,3 +113,50 @@ class TestDatabase:
         assert len(db.load_all()) == 0
         assert db.get("User1") is None
 
+    def test_wal_mode_and_concurrency(self, tmp_path) -> None:
+        """Verify SQLite operates in WAL mode with PRAGMAs and handles concurrent readers/writers without locking."""
+        import concurrent.futures
+
+        db_path = str(tmp_path / "wal_concurrency.db")
+        db = DatabaseManager(db_path=db_path)
+
+        # Verify PRAGMAs
+        with db._connect() as conn:
+            mode = conn.execute("PRAGMA journal_mode;").fetchone()[0]
+            assert mode.lower() == "wal"
+            sync = conn.execute("PRAGMA synchronous;").fetchone()[0]
+            # synchronous NORMAL corresponds to 1 in SQLite
+            assert sync in (1, "NORMAL", "normal")
+
+        # Run concurrent readers and writers
+        errors: list[Exception] = []
+
+        def writer(worker_id: int):
+            try:
+                for i in range(10):
+                    emb = np.ones(512, dtype=np.float32) / np.sqrt(512)
+                    name = f"Worker_{worker_id}_{i}"
+                    db.save(StoredIdentity(name=name, master_embedding=emb, details={"step": i}))
+            except Exception as e:
+                errors.append(e)
+
+        def reader():
+            try:
+                for _ in range(20):
+                    gallery = db.load_all()
+                    _ = len(gallery)
+            except Exception as e:
+                errors.append(e)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            futures = []
+            for w in range(4):
+                futures.append(executor.submit(writer, w))
+            for _ in range(4):
+                futures.append(executor.submit(reader))
+            concurrent.futures.wait(futures)
+
+        assert len(errors) == 0, f"Concurrent database operations failed with errors: {errors}"
+        final_gallery = db.load_all()
+        assert len(final_gallery) == 40
+

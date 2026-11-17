@@ -6,6 +6,9 @@ A real-time face recognition and enrollment system where **your smartphone's cam
 - **One Command to Run Everything:** Simply run `python main.py` (or `python run_web.py`) on your laptop.
 - **In-Browser ML Camera Stream:** High-speed WebSocket streaming from your mobile browser to the laptop's InsightFace ArcFace 512-D inference engine.
 - **In-Browser Face Enrollment & Directory:** Snap multi-photo bursts with the camera shutter button or upload photos from your phone gallery to enroll new members under their name and details.
+- **Low-Light Resilience:** Automated real-time luminance analysis, adaptive CLAHE, dynamic gamma expansion, and hardware flashlight (torch) toggle for challenging dark environments.
+- **Multi-Device Concurrency:** Real-time multi-smartphone streaming powered by SQLite WAL mode and thread-safe connection managers with live device counters.
+- **Enhanced Mobile Enrollment UX:** Mobile-optimized touch gestures, responsive form scrolling, and keyboard-aware auto-scroll clearance.
 
 ---
 
@@ -110,6 +113,20 @@ When launched, the server automatically:
 - **Multi-Photo Centroid Averaging:** Enrolls identities using 5–10 photos across different expressions, lighting conditions, and glasses on/off. Computes the element-wise mean and applies unit L2-normalization for intra-person variance stability.
 - **Vectorized NumPy Matching:** High-speed cosine similarity via matrix dot product:
   $$\text{scores} = \mathbf{M}_{\text{gallery}} \cdot \mathbf{q}_{\text{query}}$$
+- **Low-Light Facial Enhancement & Two-Pass Detection:**
+  - **Luminance Analysis:** Automated average luminance computation (`compute_frame_brightness`) using the BT.601 standard ($Y = 0.299R + 0.587G + 0.114B$).
+  - **Zero-Latency Pass 1:** Detects directly on well-lit raw frames with zero added overhead.
+  - **Adaptive Pass 2:** When brightness drops below 95.0 luma and no face is found, the detector automatically invokes dynamic non-linear gamma expansion ($\gamma = 0.50 \dots 0.65$ via fast LUT) and Contrast Limited Adaptive Histogram Equalization (CLAHE, `clipLimit=2.8`, `tileGridSize=(8, 8)`) on the LAB $L$-channel to recover shadow details.
+  - **Hardware Torch / Flashlight Toggle:** Automatically detects device camera capabilities via `MediaStreamTrack.getCapabilities().torch` and provides instant hardware flashlight control directly on the live HUD and enrollment viewfinder.
+- **Multi-User Concurrency & SQLite WAL Engine:**
+  - **Simultaneous Smartphone Streams:** Multi-client WebSocket tracker (`ConnectionManager`) assigns unique connection IDs and coordinates multiple devices running inference simultaneously.
+  - **Live Device Count HUD:** Real-time stream telemetry displays both active FPS and connected device count (e.g., `24.5 FPS • 2 Devices`).
+  - **High-Concurrency SQLite WAL Mode:** Configured with `PRAGMA journal_mode = WAL`, `PRAGMA busy_timeout = 5000`, and `PRAGMA synchronous = NORMAL` for non-blocking concurrent reads and resilient multi-device writes.
+  - **Snapshot Isolation:** Reentrant thread locks (`RLock`) on gallery structures ensure that real-time inference never blocks or races against identity enrollments or deletions.
+- **Mobile Touch & Responsive Enrollment UX:**
+  - **Touch Gestures & Viewport Scrolling:** Native touch gesture responsiveness with `-webkit-overflow-scrolling: touch`, `overscroll-behavior-y: contain`, and `touch-action: pan-y`.
+  - **Virtual Keyboard Clearance:** Intelligent scroll assistants (`scrollElementIntoView`) automatically scroll form fields and confirmation buttons into view on focus, preventing them from being obscured by mobile virtual keyboards.
+  - **In-Viewfinder Controls:** Quick camera flip and torch toggle buttons positioned for single-handed thumb operation.
 - **High-Readability HUD Overlay:** Color-coded bounding boxes (Emerald Green for recognized, Crimson Red for Unknown) with solid background rectangles behind label text for crisp contrast under any lighting.
 - **100% Local Biometrics:** All embeddings and metadata are stored offline in SQLite (`users.db`). No cloud API calls or external data transfers.
 
@@ -219,7 +236,7 @@ python live_server.py --stream-url http://192.168.1.15:8080/video --threshold 0.
 
 ## Running the Automated Test Suite
 
-The test suite validates all six acceptance criteria (**S1–S6**) from the specification:
+The test suite validates all six acceptance criteria (**S1–S6**) from the specification alongside advanced low-light resilience, SQLite WAL concurrency, and multi-device WebSocket streaming:
 
 ```bash
 pytest
@@ -229,13 +246,17 @@ pytest
 python -m pytest -v
 ```
 
-### Verified Criteria
-- **S1 (Stream Ingestion):** Verified that `FrameSource` yields $\ge 5$ non-empty frames within 3 seconds using mocked MJPEG grabbers.
-- **S2 (Enrollment Persistence):** Verified that enrollment of multiple embeddings computes the exact L2-normalized mean centroid in SQLite.
-- **S3 (Known-Face Recognition):** Verified positive identification and metadata display when similarity $\ge \text{threshold}$.
-- **S4 (Unknown Rejection):** Verified strangers and dissimilar faces are labeled `Unknown` with `details=None`.
-- **S5 (Robustness to Variation):** Verified multi-image templates correctly recognize query frames across glasses-on / glasses-off variations.
-- **S6 (Stream Error Handling):** Verified that unreachable stream URLs raise `StreamConnectionError` within 5 seconds without hanging.
+### Verified Criteria & Test Coverage (68 Tests Passing)
+- **S1 (Stream Ingestion):** Verified that `FrameSource` yields $\ge 5$ non-empty frames within 3 seconds using mocked MJPEG grabbers (`test_stream.py`).
+- **S2 (Enrollment Persistence):** Verified that enrollment of multiple embeddings computes the exact L2-normalized mean centroid in SQLite (`test_enrollment.py`).
+- **S3 (Known-Face Recognition):** Verified positive identification and metadata display when similarity $\ge \text{threshold}$ (`test_matcher.py`).
+- **S4 (Unknown Rejection):** Verified strangers and dissimilar faces are labeled `Unknown` with `details=None` (`test_matcher.py`).
+- **S5 (Robustness to Variation):** Verified multi-image templates correctly recognize query frames across glasses-on / glasses-off variations (`test_enrollment.py`).
+- **S6 (Stream Error Handling):** Verified that unreachable stream URLs raise `StreamConnectionError` within 5 seconds without hanging (`test_stream.py`).
+- **Low-Light Resilience:** Validates BT.601 brightness estimation, dynamic gamma expansion, shadow luminance boost, two-pass secondary detection triggers, CLAHE fallback, and zero exception leakage on corrupt/empty frames (`test_detector.py`).
+- **Concurrency & WAL Mode:** Validates multi-thread SQLite connections, WAL journal mode, busy timeouts, and non-blocking reads during concurrent writes (`test_database.py`).
+- **Web & Multi-Device Streaming:** Validates REST endpoints, image upload enrollment, base64 shutter captures, gallery deletion, WebSocket binary frame pipeline, active client counts, and thread-safe gallery locks (`test_server.py`, `test_web.py`).
+- **Network & CLI Launcher:** Validates LAN IP detection, self-signed SSL certificate generation with SAN, ASCII QR code rendering, and CLI arguments (`test_run_web.py`).
 
 ---
 
@@ -248,30 +269,34 @@ FACE 2.0/
 │   └── key.pem                   # RSA 2048 private key
 ├── web/                          # Mobile Web Application & API
 │   ├── __init__.py               # Web package initialization
-│   ├── server.py                 # FastAPI backend, WebSocket /ws/recognize, REST endpoints
+│   ├── server.py                 # FastAPI backend, WebSocket /ws/recognize, REST endpoints, ConnectionManager
 │   ├── static/                   # Mobile client assets
-│   │   ├── app.js                # Camera streaming, canvas HUD, shutter burst, REST calls
-│   │   └── style.css             # Dark-themed responsive mobile CSS
+│   │   ├── app.js                # Camera streaming, canvas HUD, shutter burst, torch control, scroll assist
+│   │   └── style.css             # Dark-themed responsive mobile CSS, touch scrolling, torch accents
 │   └── templates/
-│       └── index.html            # Mobile single-page UI (Live, Enroll, Directory)
+│       └── index.html            # Mobile single-page UI (Live HUD, Torch toggle, Enroll, Directory)
 ├── run_web.py                    # One-command mobile launcher (IP detection, SSL, QR code)
 ├── main.py                       # Universal entrypoint (--web, webcam, or remote stream)
 ├── live_server.py                # Desktop OpenCV live streaming & recognition server
 ├── capture.py                    # Threaded FrameSource & StreamConnectionError
-├── database.py                   # SQLite DatabaseManager, StoredIdentity, Gallery
-├── detector.py                   # FaceDetector wrapping InsightFace (ctx_id=-1)
+├── database.py                   # SQLite DatabaseManager with WAL mode, StoredIdentity, Gallery
+├── detector.py                   # FaceDetector with low-light brightness analysis & adaptive CLAHE/gamma
 ├── recognizer.py                 # ArcFaceRecognizer for 512-D float32 embeddings
 ├── matcher.py                    # Vectorized CosineMatcher (matrix dot product)
 ├── enrollment.py                 # Centroid aggregation & L2-normalization math
 ├── overlay.py                    # OverlayRenderer with solid badges & HUD
 ├── enroll.py                     # Offline multi-photo enrollment CLI
 ├── pytest.ini                    # Pytest configuration
-├── users.db                      # Local SQLite biometric database
+├── users.db                      # Local SQLite biometric database (WAL mode)
 └── tests/
-    ├── test_database.py          # SQLite BLOB roundtrip & schema tests
+    ├── test_database.py          # SQLite BLOB roundtrip, schema, and WAL concurrency tests
+    ├── test_detector.py          # Low-light luminance, gamma boost, and two-pass detection tests
     ├── test_enrollment.py        # S2 & S5 math & persistence tests
-    ├── test_matcher.py           # S3 & S4 cosine similarity tests
+    ├── test_matcher.py           # S3 & S4 cosine similarity and batch tests
+    ├── test_run_web.py           # LAN IP, SSL certificate, and QR code tests
+    ├── test_server.py            # FastAPI REST & multi-client WebSocket tests
     ├── test_stream.py            # S1 & S6 threaded stream tests
+    ├── test_web.py               # Web pipeline, binary frame, and edge-case tests
     └── test_integration.py       # End-to-end pipeline integration tests
 ```
 

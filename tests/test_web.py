@@ -104,7 +104,8 @@ def test_members_lifecycle(web_test_client: tuple[TestClient, Any, Any, Path]) -
     # 1. Directory is initially empty
     res_empty = client.get("/api/members")
     assert res_empty.status_code == 200
-    assert res_empty.json() == {"members": []}
+    assert res_empty.json()["members"] == []
+    assert "active_clients" in res_empty.json()
 
     # 2. Enroll an identity via upload
     jpeg_bytes = generate_synthetic_jpeg()
@@ -141,7 +142,7 @@ def test_members_lifecycle(web_test_client: tuple[TestClient, Any, Any, Path]) -
     # 5. Verify member is removed from directory
     res_after_del = client.get("/api/members")
     assert res_after_del.status_code == 200
-    assert res_after_del.json() == {"members": []}
+    assert res_after_del.json()["members"] == []
 
     # 6. Deleting a non-existent member returns 404
     del_404 = client.delete("/api/members/Marcus Wright")

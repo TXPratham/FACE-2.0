@@ -29,6 +29,8 @@
     cameraStream: null,
     facingMode: 'environment', // Defaults to rear camera per user specification
     isStreamPaused: false,
+    torchOn: false,
+    torchSupported: false,
 
     // WebSocket & Live Inference Loop
     ws: null,
@@ -41,6 +43,7 @@
     fps: 0,
     fpsIntervalStart: performance.now(),
     fpsFrameCounter: 0,
+    activeClients: 1,
 
     // Auto-hide timer for recognition bottom sheet
     recogSheetTimer: null,
@@ -69,6 +72,9 @@
     streamStatusDot: document.getElementById('streamStatusDot'),
     streamStatusText: document.getElementById('streamStatusText'),
     streamFps: document.getElementById('streamFps'),
+    btnToggleTorch: document.getElementById('btnToggleTorch'),
+    iconTorchOff: document.getElementById('iconTorchOff'),
+    iconTorchOn: document.getElementById('iconTorchOn'),
     btnFlipCamera: document.getElementById('btnFlipCamera'),
     btnToggleStream: document.getElementById('btnToggleStream'),
     iconStreamPause: document.getElementById('iconStreamPause'),
@@ -102,6 +108,7 @@
 
     // Enrollment: Shutter View
     enrollVideo: document.getElementById('enrollVideo'),
+    btnEnrollTorch: document.getElementById('btnEnrollTorch'),
     btnEnrollFlip: document.getElementById('btnEnrollFlip'),
     viewfinderFlash: document.getElementById('viewfinderFlash'),
     btnShutter: document.getElementById('btnShutter'),
@@ -181,6 +188,13 @@
   async function initCamera(facingMode = 'environment') {
     state.facingMode = facingMode;
 
+    if (state.torchOn && state.cameraStream) {
+      try {
+        const track = state.cameraStream.getVideoTracks()[0];
+        if (track) await track.applyConstraints({ advanced: [{ torch: false }] });
+      } catch (_) {}
+    }
+
     if (state.cameraStream) {
       state.cameraStream.getTracks().forEach((track) => track.stop());
       state.cameraStream = null;
@@ -234,11 +248,92 @@
       // Configure overlay canvas resolution to match video stream
       updateCanvasDimensions();
       setPlaceholder(false);
+      
+      // Detect hardware torch capability on active track
+      checkTorchSupport();
+
       showToast(`Camera active (${state.facingMode === 'environment' ? 'Rear' : 'Front'})`, 'info', 2000);
     } catch (err) {
       console.error('Camera initialization failed:', err);
+      checkTorchSupport();
       setPlaceholder(true, `Camera error: ${err.name || err.message}`);
       showToast(`Could not open camera: ${err.message}`, 'error', 4500);
+    }
+  }
+
+  // =========================================================================
+  // CAMERA TORCH / HARDWARE FLASHLIGHT
+  // =========================================================================
+  function checkTorchSupport() {
+    state.torchOn = false;
+    state.torchSupported = false;
+    updateTorchUI();
+
+    if (!state.cameraStream) {
+      if (el.btnToggleTorch) el.btnToggleTorch.classList.add('hidden');
+      if (el.btnEnrollTorch) el.btnEnrollTorch.classList.add('hidden');
+      return;
+    }
+
+    const track = state.cameraStream.getVideoTracks()[0];
+    if (track && typeof track.getCapabilities === 'function') {
+      try {
+        const caps = track.getCapabilities();
+        if (caps && caps.torch) {
+          state.torchSupported = true;
+          if (el.btnToggleTorch) el.btnToggleTorch.classList.remove('hidden');
+          if (el.btnEnrollTorch) el.btnEnrollTorch.classList.remove('hidden');
+          return;
+        }
+      } catch (err) {
+        console.warn('Could not read track capabilities:', err);
+      }
+    }
+
+    if (el.btnToggleTorch) el.btnToggleTorch.classList.add('hidden');
+    if (el.btnEnrollTorch) el.btnEnrollTorch.classList.add('hidden');
+  }
+
+  function updateTorchUI() {
+    if (el.btnToggleTorch) {
+      el.btnToggleTorch.classList.toggle('torch-active', state.torchOn);
+      if (el.iconTorchOff) el.iconTorchOff.classList.toggle('hidden', state.torchOn);
+      if (el.iconTorchOn) el.iconTorchOn.classList.toggle('hidden', !state.torchOn);
+    }
+    if (el.btnEnrollTorch) {
+      el.btnEnrollTorch.classList.toggle('torch-active', state.torchOn);
+    }
+  }
+
+  async function toggleTorch() {
+    if (!state.cameraStream) {
+      showToast('Camera feed inactive', 'error');
+      return;
+    }
+
+    const track = state.cameraStream.getVideoTracks()[0];
+    if (!track) {
+      showToast('Camera track not found', 'error');
+      return;
+    }
+
+    if (!state.torchSupported) {
+      showToast('Flashlight not supported on this camera', 'info', 2000);
+      return;
+    }
+
+    try {
+      state.torchOn = !state.torchOn;
+      await track.applyConstraints({
+        advanced: [{ torch: state.torchOn }],
+      });
+      updateTorchUI();
+      showToast(`Flashlight ${state.torchOn ? 'ON' : 'OFF'}`, 'info', 1500);
+    } catch (err) {
+      console.error('Torch toggle failed:', err);
+      state.torchOn = false;
+      updateTorchUI();
+      showToast(`Flashlight error: ${err.message || 'Failed to toggle'}`, 'error', 2500);
     }
   }
 
@@ -330,16 +425,29 @@
     }
   }
 
+  function updateFpsDisplay(fpsVal) {
+    const fps = fpsVal !== undefined && fpsVal !== null ? fpsVal : state.fps;
+    const fpsText = `${fps} FPS`;
+    const count = state.activeClients || 1;
+    if (count > 1) {
+      el.streamFps.textContent = `⚡ ${count} Devices | ${fpsText}`;
+    } else {
+      el.streamFps.textContent = fpsText;
+    }
+  }
+
   function updateConnectionStatus(status) {
     el.streamStatusDot.className = 'status-dot';
     if (status === 'connected') {
       el.streamStatusDot.classList.add('connected');
       el.streamStatusText.textContent = state.isStreamPaused ? 'Paused' : 'Streaming';
+      updateFpsDisplay();
     } else if (status === 'connecting') {
       el.streamStatusText.textContent = 'Connecting...';
     } else {
       el.streamStatusDot.classList.add('disconnected');
       el.streamStatusText.textContent = 'Offline';
+      state.activeClients = 1;
       el.streamFps.textContent = '0.0 FPS';
     }
   }
@@ -429,7 +537,7 @@
 
     if (elapsed >= 1000) {
       state.fps = (state.fpsFrameCounter / (elapsed / 1000)).toFixed(1);
-      el.streamFps.textContent = `${state.fps} FPS`;
+      updateFpsDisplay(state.fps);
       state.fpsFrameCounter = 0;
       state.fpsIntervalStart = now;
     }
@@ -447,10 +555,16 @@
       return;
     }
 
+    // Backend active clients sync
+    if (data.active_clients !== undefined) {
+      state.activeClients = parseInt(data.active_clients, 10) || 1;
+    }
+
     // Backend FPS indicator sync (if provided)
     if (data.fps !== undefined && Number(data.fps) > 0) {
-      el.streamFps.textContent = `${Number(data.fps).toFixed(1)} FPS`;
+      state.fps = Number(data.fps).toFixed(1);
     }
+    updateFpsDisplay(state.fps);
 
     // Clear overlay canvas
     overlayCtx.clearRect(0, 0, el.overlayCanvas.width, el.overlayCanvas.height);
@@ -662,6 +776,20 @@
   }
 
   // =========================================================================
+  // MOBILE SCROLL & KEYBOARD VISIBILITY HELPERS
+  // =========================================================================
+  function scrollElementIntoView(element, options = { behavior: 'smooth', block: 'nearest' }) {
+    if (!element) return;
+    setTimeout(() => {
+      try {
+        element.scrollIntoView(options);
+      } catch (_) {
+        element.scrollIntoView();
+      }
+    }, 120);
+  }
+
+  // =========================================================================
   // ENROLLMENT STUDIO - SUB-VIEW A: CAMERA SHUTTER
   // =========================================================================
   function handleSnapShutter() {
@@ -692,6 +820,13 @@
 
     renderShutterThumbnails();
     showToast(`Snapped photo ${state.shutterPhotos.length}`, 'info', 1200);
+
+    // Auto-scroll helper: bring confirm button or thumbnail strip into view
+    if (state.shutterPhotos.length >= 3) {
+      scrollElementIntoView(el.btnSaveEnrollCaptures, { behavior: 'smooth', block: 'nearest' });
+    } else {
+      scrollElementIntoView(el.shutterThumbnails, { behavior: 'smooth', block: 'nearest' });
+    }
   }
 
   function renderShutterThumbnails() {
@@ -818,6 +953,7 @@
     state.galleryFiles = state.galleryFiles.concat(files);
     renderGalleryPreviews();
     showToast(`Added ${files.length} photo(s)`, 'info', 1500);
+    scrollElementIntoView(el.btnUploadEnrollGallery, { behavior: 'smooth', block: 'nearest' });
   }
 
   function renderGalleryPreviews() {
@@ -946,6 +1082,11 @@
       }
 
       const data = await response.json();
+      if (data && data.active_clients !== undefined) {
+        state.activeClients = parseInt(data.active_clients, 10) || 1;
+        updateFpsDisplay();
+      }
+
       // Support array directly or object wrapper { members: [...] } / { identities: [...] }
       let members = [];
       if (Array.isArray(data)) {
@@ -1176,6 +1317,7 @@
     });
 
     // Live Tab Controls
+    if (el.btnToggleTorch) el.btnToggleTorch.addEventListener('click', toggleTorch);
     el.btnFlipCamera.addEventListener('click', toggleCameraFacing);
     el.btnToggleStream.addEventListener('click', toggleStreamPlayback);
     el.btnCloseCard.addEventListener('click', hideRecognizedCard);
@@ -1185,10 +1327,21 @@
     el.segmentGallery.addEventListener('click', () => switchEnrollMode('gallery'));
 
     // Sub-view A: Camera Shutter
+    if (el.btnEnrollTorch) el.btnEnrollTorch.addEventListener('click', toggleTorch);
     el.btnEnrollFlip.addEventListener('click', toggleCameraFacing);
     el.btnShutter.addEventListener('click', handleSnapShutter);
     el.btnClearShutterPhotos.addEventListener('click', clearAllShutterPhotos);
     el.shutterEnrollForm.addEventListener('submit', handleShutterEnrollSubmit);
+
+    // Auto-scroll on form field focus so submit buttons remain visible above virtual keyboard
+    [el.shutterName, el.shutterRole, el.shutterNotes].forEach((field) => {
+      if (!field) return;
+      field.addEventListener('focus', () => {
+        setTimeout(() => {
+          scrollElementIntoView(el.btnSaveEnrollCaptures, { behavior: 'smooth', block: 'nearest' });
+        }, 280);
+      });
+    });
 
     // Sub-view B: Gallery Upload
     el.btnSelectFiles.addEventListener('click', () => el.galleryFileInput.click());
@@ -1228,6 +1381,15 @@
     });
 
     el.galleryEnrollForm.addEventListener('submit', handleGalleryEnrollSubmit);
+
+    [el.galleryName, el.galleryRole, el.galleryNotes].forEach((field) => {
+      if (!field) return;
+      field.addEventListener('focus', () => {
+        setTimeout(() => {
+          scrollElementIntoView(el.btnUploadEnrollGallery, { behavior: 'smooth', block: 'nearest' });
+        }, 280);
+      });
+    });
 
     // Directory
     el.directorySearch.addEventListener('input', (e) => {
